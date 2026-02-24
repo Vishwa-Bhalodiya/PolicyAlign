@@ -1,0 +1,88 @@
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+env/
+.venv/
+
+# Environment variables
+.env
+.env.*
+*.env
+
+# -------------------------
+# FastAPI / Uvicorn
+# -------------------------
+*.log
+
+# -------------------------
+# Database
+# -------------------------
+*.db
+*.sqlite3
+
+# PostgreSQL dump files
+*.sql
+
+# -------------------------
+# IDE Files
+# -------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# -------------------------
+# OS Files
+# -------------------------
+.DS_Store
+Thumbs.db
+
+# -------------------------
+# Sentence Transformers / Models
+# -------------------------
+*.bin
+*.pt
+*.pth
+*.onnx
+
+# HuggingFace cache
+.cache/
+huggingface/
+transformers_cache/
+
+# -------------------------
+# Coverage / Testing
+# -------------------------
+.coverage
+htmlcov/
+.pytest_cache/
+
+# -------------------------
+# Build / Distribution
+# -------------------------
+build/
+dist/
+*.egg-info/
+
+# -------------------------
+# Logs
+# -------------------------
+*.log
+
+# -------------------------
+# Misc
+# -------------------------
+*.tmp
+*.bak
+
+
+# -------------------------
+# Uploaded Files (User Documents)
+# -------------------------
+uploaded_files/
