@@ -9,11 +9,12 @@ from langchain_core.prompts import ChatPromptTemplate
 from app.models.paragraph import Paragraph
 from app.models.paragraph_classification import ParagraphClassification
 from app.comparison.vector_store import DomainVectorStore
+from app.core.rate_limiter import rate_limiter
 
 
 
 llm = ChatMistralAI(
-    model="mistral-large-latest",
+    model="mistral-small-latest",
     temperature=0,
     model_kwargs={"response_format": {"type": "json_object"}}
 )
@@ -33,16 +34,21 @@ def ai_semantic_match(client_text: str, vendor_text: str)-> Dict :
     
     Determine whether the vendor paragraph SUBSTANTIALLY satisfies the compliance obligation stated in the client paragraph.
     
-    Substantial satisfaction means:
-    - Same governance intent
-    - Same risk control objective
-    - Comparable enforcement requirement
-    - Similar operational implementation
+    Substantial satisfaction requires:
+    
+    - Equivalent scope
+    - Equivalent regulatory refrence (if mentioned)
+    - Equivalent implementation obligation
+    - Equivalent enforcement requirement
+    
+    General governance language does NOT qualify.
+    Broader but vague language does NOT qualify.
+    If explicit requirements are missing, return match=false.
     
     Minor wording differences do NOT invalidate equivalence.
-    Broader coverage may still qualify if core obligation is met.
     
-    Be objective and balanced
+    
+    Be objective and conservative in judgment.
     
     Return STRICT JSON only:
     
@@ -69,7 +75,7 @@ def ai_semantic_match(client_text: str, vendor_text: str)-> Dict :
     )
     
     chain = prompt | llm
-    
+    rate_limiter.wait()  # Ensure we respect rate limits
     result =  chain.invoke({
         "client_text": client_text,
         "vendor_text": vendor_text
@@ -91,7 +97,7 @@ def build_vendor_vector_store(db: Session, vendor_document_id: int) -> DomainVec
 
     vendor_paragraphs = (
         db.query(Paragraph)
-        .filter(Paragraph.document.has(document_type = "vendor")).all()
+        .filter(Paragraph.document_id == vendor_document_id, Paragraph.document.has(document_type = "vendor")).all()
     )
 
     texts = []
@@ -117,7 +123,7 @@ def build_vendor_vector_store(db: Session, vendor_document_id: int) -> DomainVec
     return vector_store
 
 
-def match_client_paragraph(db: Session, client_paragraph_id: int, vector_store: DomainVectorStore,top_k_domain: int=5, top_k_global: int = 3) -> Optional[Dict]:
+def match_client_paragraph(db: Session, client_paragraph_id: int, vector_store: DomainVectorStore,top_k_domain: int=2, top_k_global: int = 1) -> Optional[Dict]:
 
     client_para = db.query(Paragraph).filter(Paragraph.id == client_paragraph_id).first()
     
@@ -162,7 +168,13 @@ def match_client_paragraph(db: Session, client_paragraph_id: int, vector_store: 
 
     verified_matches = []
     
+    EMBEDDING_THRESHOLD = 0.50
+    
     for candidate in candidates:
+        embedding_score = candidate.get("score", 0.0)
+        
+        if embedding_score < EMBEDDING_THRESHOLD:
+            continue
         
         ai_result = ai_semantic_match(
             client_para.text,
@@ -170,9 +182,11 @@ def match_client_paragraph(db: Session, client_paragraph_id: int, vector_store: 
         )
         
         ai_score = ai_result.get("similarity_score", 0.0)
-        embedding_score = candidate.get("score", 0.0)
         
-        final_score = (embedding_score*0.3) + (ai_score * 0.7)
+        final_score = (embedding_score * 0.3) + (ai_score * 0.7)
+
+        if domain_name and candidate["domain"] != domain_name:
+            final_score = max(0.0, final_score - 0.05)
         
         if ai_result.get("match") and final_score >=0.60:
             verified_matches.append({

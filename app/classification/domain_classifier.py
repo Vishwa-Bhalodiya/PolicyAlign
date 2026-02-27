@@ -1,6 +1,7 @@
 import numpy as np
 from typing import List, Dict, Tuple
 from sqlalchemy.orm import Session
+import time
 
 
 from sentence_transformers import SentenceTransformer
@@ -14,20 +15,25 @@ from langchain_core.output_parsers import PydanticOutputParser
 
 
 from app.models.domains import ComplianceDomain
+from app.core.llm import get_llm
+from app.core.rate_limiter import rate_limiter
 
 
 #Load embedding model
 model = SentenceTransformer("all-mpnet-base-v2")
 
-EMBEDDING_THRESHOLD = 0.60
+EMBEDDING_THRESHOLD = 0.50
 AI_THRESHOLD = 0.70
 
 
 #Domain Cache (Avoid recomputing embeddings)
 _domain_cache = {
     "names": None,
-    "embeddings": None
+    "embeddings": None,
+    "timestamp": None
 }
+
+CACHE_TTL = 600
 
 #Load Domains from Database
 
@@ -35,7 +41,7 @@ def load_domains_from_db(db: Session) -> Tuple[List[str], np.ndarray]:
     
     global _domain_cache
     
-    if _domain_cache["names"] is not None:
+    if (_domain_cache["names"] is not None and time.time() - _domain_cache["timestamp"] < CACHE_TTL):
         return _domain_cache["names"], _domain_cache["embeddings"]
     
     domains = db.query(ComplianceDomain).all()
@@ -53,6 +59,7 @@ def load_domains_from_db(db: Session) -> Tuple[List[str], np.ndarray]:
     
     _domain_cache["names"] = names
     _domain_cache["embeddings"] = embeddings
+    _domain_cache["timestamp"] = time.time()
     
     return names, embeddings
     
@@ -97,11 +104,7 @@ class DomainPrediction(BaseModel):
     
 parser = PydanticOutputParser(pydantic_object=DomainPrediction)
 
-llm = ChatMistralAI(
-    model="mistral-large-latest",
-    temperature=0
-)
-
+llm = get_llm()
 
 def ai_classify(paragraph: str, valid_domains: List[str]) -> Dict:
     
@@ -132,6 +135,7 @@ def ai_classify(paragraph: str, valid_domains: List[str]) -> Dict:
     chain = prompt| llm | parser
     
     try:
+        rate_limiter.wait()  # Ensure we respect rate limits
         result = chain.invoke({"paragraph": paragraph})
         
         if result.domain in valid_domains:
@@ -200,10 +204,15 @@ def classify_paragraph(paragraph: str, db: Session)-> Dict:
 #Batch Classification
 def classify_paragraphs(paragraphs: List[Dict], db: Session) -> List[Dict]:
     
+    valid_domains, domain_embeddings = load_domains_from_db(db)
     results =[]
     
     for para in paragraphs:
-        result = classify_paragraph(para["text"], db)
+        result = classify_paragraph_internal(
+            para["text"],
+            valid_domains,
+            domain_embeddings
+        )
         
         results.append({
             "paragraph_id": para["paragraph_id"],

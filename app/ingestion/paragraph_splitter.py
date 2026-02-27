@@ -5,8 +5,9 @@ from langchain_mistralai import ChatMistralAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from app.utils.pdf_cleanup import normalize, looks_like_metadata, detect_repeated_lines
+from app.core.rate_limiter import rate_limiter
 
-MIN_PARAGRAPH_LENGTH = 20 #characters
+MIN_PARAGRAPH_LENGTH = 50 #characters
 
 #Define Structured Output
 class ParagraphList(BaseModel):
@@ -88,6 +89,7 @@ def split_into_paragraphs(text: str):
     
     #AI-based semantic splitting
     try:
+        rate_limiter.wait()  # Ensure we respect rate limits
         result = chain.invoke(
             {
                 "document": cleaned_text,

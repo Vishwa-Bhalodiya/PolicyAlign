@@ -1,8 +1,12 @@
 from sqlalchemy.orm import Session
 from typing import Dict, List
+from collections import defaultdict
 
 from app.models.paragraph import Paragraph
 from app.comparison.semantic_matcher import (match_client_paragraph, build_vendor_vector_store)
+from app.comparison.gap_analyzer import analyze_gaps
+from app.comparison.vector_store import DomainVectorStore
+from app.ingestion.atomic_splitter import split_into_atomic
 
 
 def match_documents(db: Session, client_document_id: int, vendor_document_id: int) -> Dict:
@@ -28,24 +32,81 @@ def match_documents(db: Session, client_document_id: int, vendor_document_id: in
         .all()
     )
     
+    vendor_paragraphs = (
+        db.query(Paragraph)
+        .filter(Paragraph.document_id == vendor_document_id)
+        .all()
+    )
+    
+    vendor_texts = [v.text for v in vendor_paragraphs]
     total_paragraphs = len(client_paragraphs)
+    
+    all_vendor_atomics = []
+    paragraph_ids = []
+    domains = []
+    
+    pid_counter = 0
+    
+    for vendor_text in vendor_texts:
+        vendor_atomics = split_into_atomic(vendor_text)
+        
+        for v_atomic in vendor_atomics:
+            all_vendor_atomics.append(v_atomic)
+            paragraph_ids.append(pid_counter)
+            domains.append("Vendor")
+            pid_counter += 1
+            
+    atomic_vector_store = DomainVectorStore()
+    atomic_vector_store.build(all_vendor_atomics, paragraph_ids, domains)
     
     matched : List[Dict] = []
     unmatched : List[str] = []
-    
     confidence_scores: List[float] = []
+    
+    #Track how many times each vendor paragraph is reused
+    vendor_match_counter = defaultdict(int)
     
     
     for para in client_paragraphs:
         result = match_client_paragraph(db, para.id, vector_store)
         
-        if not result or not result["matched_vendor_paragraphs"]:
-            unmatched.append(para.text)
+        if not result or not result.get("matched_vendor_paragraphs"):
+            
+            atomic_matched, atomic_gaps = analyze_gaps(para.text, atomic_vector_store, vendor_texts)
+            
+            
+            print("Atomic Matched:", atomic_matched)
+            print("Atomic Gaps:", atomic_gaps)
+            #Add atomic matches
+            for m in atomic_matched:
+                matched.append({
+                    "client_paragraph": m["client_atomic"],
+                    "confidence": m["confidence"],
+                    "atomic_level": True
+                })
+                confidence_scores.append(m["confidence"])
+                
+            #Track atomic gaps separately
+            for g in atomic_gaps:
+                unmatched.append(g)
+            
             continue
         
         best_match = result["matched_vendor_paragraphs"][0]
+        vendor_id = best_match["paragraph_id"]
         
-        confidence_scores.append(result["confidence"])
+        vendor_match_counter[vendor_id] +=1
+        
+        if vendor_match_counter[vendor_id] >5:
+            penalty = 0.05*(vendor_match_counter[vendor_id] - 5)
+            best_match["final_score"] = max (
+                0.0,
+                round(best_match["final_score"] - penalty, 3)
+            )
+            
+            
+        confidence = best_match["final_score"]
+        confidence_scores.append(confidence)
         
         matched.append({
             "client_paragraph": para.text,
