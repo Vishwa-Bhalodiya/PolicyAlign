@@ -59,8 +59,6 @@ Each paragraph is classified into a regulatory domain such as:
 ```bash
 app/classification/
   domain_classifier.py
-  atomic_classifier.py
-  prompts.py
 ```
 
 ### 3. Vector Search (Embedding Layer):
@@ -128,10 +126,7 @@ Produces structured JSON output:
 - Gap explanations
 - Suggested remediation text
 
-**Module:**
-```bash
-app/comparison/report_builder.py
-```
+
 
 ## System Folw
 
