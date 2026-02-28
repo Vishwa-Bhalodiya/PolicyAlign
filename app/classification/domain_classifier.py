@@ -208,7 +208,7 @@ def classify_paragraphs(paragraphs: List[Dict], db: Session) -> List[Dict]:
     results =[]
     
     for para in paragraphs:
-        result = classify_paragraph_internal(
+        result = classify_paragraph(
             para["text"],
             valid_domains,
             domain_embeddings

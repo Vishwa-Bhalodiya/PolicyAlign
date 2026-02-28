@@ -16,6 +16,8 @@ import app.models.domains
 from app.db.database import SessionLocal
 from app.comparison.document_matcher import match_documents
 from app.ingestion.upload import router as ingestion_router
+from app.comparison.gap_analyzer import analyze_gaps
+
 
 app = FastAPI(title="PolicyAlign - Policy Compliance System")
 
